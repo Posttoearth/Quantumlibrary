@@ -9,11 +9,18 @@ const App = () => {
     const sceneRef = useRef(null);
     const cameraRef = useRef(null);
     const rendererRef = useRef(null);
-    // State to keep track of the number of shapes and their references
-    const [shapes, setShapes] = useState([]);
-    const shapeMeshesRef = useRef([]); // To hold actual Three.js mesh objects
+    // Ref to hold actual Three.js mesh objects for direct manipulation and cleanup
+    const shapeMeshesRef = useRef([]);
 
-    // Mouse interaction variables (simplified as automatic rotation is preferred)
+    // State for calculator input values
+    const [number1, setNumber1] = useState(7); // Default value for first number
+    const [number2, setNumber2] = useState(9); // Default value for second number
+
+    // Ref to hold the loaded texture
+    const textureRef = useRef(null);
+    const [textureLoaded, setTextureLoaded] = useState(false); // State to track texture loading
+
+    // Mouse interaction variables for camera rotation (only active outside VR)
     const isDragging = useRef(false);
     const previousMousePosition = useRef({ x: 0, y: 0 });
 
@@ -30,7 +37,7 @@ const App = () => {
                 rendererRef.current.setSize(width, height);
             }
         }
-    }, []);
+    }, []); // This useCallback is stable because its dependencies (refs, xr.isPresenting) do not change its identity.
 
     // Function to enter VR session
     const enterVR = useCallback(async () => {
@@ -47,7 +54,7 @@ const App = () => {
 
                 rendererRef.current.xr.setSession(session);
 
-                // Set the animation loop for VR
+                // Set the animation loop for VR. Three.js takes over the rendering loop.
                 rendererRef.current.setAnimationLoop(() => {
                     // In VR, the camera position and rotation are handled by the XR device.
                     // We only need to animate our shapes.
@@ -61,9 +68,8 @@ const App = () => {
                 // Listen for session end
                 session.addEventListener('end', () => {
                     console.log("VR session ended.");
-                    // Reset to standard animation loop
+                    // Reset to standard animation loop when VR session ends
                     rendererRef.current.setAnimationLoop(null);
-                    // Re-enable browser-based animation loop
                     const animateNonVR = () => {
                         requestAnimationFrame(animateNonVR);
                         shapeMeshesRef.current.forEach(shape => {
@@ -80,37 +86,119 @@ const App = () => {
 
             } catch (error) {
                 console.error("Failed to enter VR:", error);
-                alert("VR not supported or session failed: " + error.message); // Using alert for now, can replace with custom modal
+                // Using alert for now, can replace with custom modal as alerts are discouraged.
+                alert("VR not supported or session failed: " + error.message);
             }
         } else {
             console.warn("WebXR not available.");
-            alert("WebXR not supported in this browser or device."); // Using alert for now
+            alert("WebXR not supported in this browser or device.");
         }
     }, [handleResize]);
 
-    // Function to add a new shape
-    const addShape = useCallback(() => {
+    // Function to clear all existing shapes from the scene
+    const clearShapes = useCallback(() => {
         if (!sceneRef.current) return;
-
-        const index = shapes.length;
-        const geometry = new THREE.BoxGeometry(1, 1, 1); // Smaller box for multiple shapes
-        const material = new THREE.MeshStandardMaterial({
-            color: Math.random() * 0xffffff, // Random color for each new shape
-            roughness: 0.5,
-            metalness: 0.5
+        shapeMeshesRef.current.forEach(shape => {
+            sceneRef.current.remove(shape);
+            if (shape.geometry) shape.geometry.dispose();
+            if (shape.material) {
+                // Dispose material(s) properly
+                if (Array.isArray(shape.material)) {
+                    shape.material.forEach(mat => mat.dispose());
+                } else {
+                    shape.material.dispose();
+                }
+            }
         });
-        const newShape = new THREE.Mesh(geometry, material);
+        shapeMeshesRef.current = []; // Clear the ref
+    }, []);
 
-        // Position the new shape next to the others
-        // We'll arrange them in a row along the X-axis
-        const spacing = 1.5; // Space between shapes
-        const startX = -((index * spacing) / 2); // Initial offset to center the group
-        newShape.position.set(startX + (index * spacing), 0, 0);
+    // Function to add a set of shapes based on number inputs and colors in a matrix
+    const addShapesForEquation = useCallback((num1, num2) => {
+        clearShapes(); // Clear existing shapes before adding new ones for a fresh equation visualization
 
-        sceneRef.current.add(newShape);
-        shapeMeshesRef.current.push(newShape); // Add to the ref for managing meshes
-        setShapes(prevShapes => [...prevShapes, { id: Date.now(), mesh: newShape }]); // Add to state for re-render if needed
-    }, [shapes.length]); // Re-create if shapes.length changes
+        if (!sceneRef.current || !textureLoaded || !textureRef.current) {
+            console.warn("Scene, texture, or texture loading not ready for adding shapes.");
+            return;
+        }
+
+        const orangeColor = new THREE.Color(0xffa500); // Orange color
+        const blueColor = new THREE.Color(0x0000ff);   // Blue color
+        const boxSize = 1;            // Size of each cube
+        const spacing = 1.2;          // Space between cubes (slightly more than boxSize for gaps)
+
+        // Matrix dimensions (5x5x5 for each block)
+        const gridX_dim = 5;
+        const gridY_dim = 5;
+        const gridZ_dim = 5;
+        const maxShapesPerBlock = gridX_dim * gridY_dim * gridZ_dim; // 125 shapes per block
+
+        const totalShapes = num1 + num2;
+        const numBlocks = Math.ceil(totalShapes / maxShapesPerBlock);
+        const blockSpacingX = (gridX_dim * spacing) + 3; // Space between blocks along X, 3 units extra
+
+        // Calculate the total width of all blocks combined for centering
+        let totalSceneWidth = 0;
+        if (numBlocks > 0) {
+            // Calculate width considering how many columns are occupied in the last block
+            const lastBlockShapes = totalShapes % maxShapesPerBlock;
+            const columnsInLastBlock = lastBlockShapes === 0 && totalShapes > 0 ? gridX_dim : (lastBlockShapes > 0 ? (lastBlockShapes -1)%gridX_dim + 1 : 0);
+            
+            totalSceneWidth = (numBlocks - 1) * blockSpacingX;
+            if (columnsInLastBlock > 0) {
+                 totalSceneWidth += (columnsInLastBlock - 1) * spacing + boxSize;
+            }
+        }
+
+        const overallStartX = -totalSceneWidth / 2; // Overall starting X to center the entire scene
+
+        // Loop through all shapes (orange first, then blue)
+        for (let i = 0; i < totalShapes; i++) {
+            const color = i < num1 ? orangeColor : blueColor;
+
+            // Calculate current block index and index within that block
+            const currentBlockIndex = Math.floor(i / maxShapesPerBlock);
+            const indexInBlock = i % maxShapesPerBlock;
+
+            // Calculate local coordinates within the 5x5x5 block
+            const xInBlock = (indexInBlock % gridX_dim);
+            const yInBlock = (Math.floor(indexInBlock / gridX_dim) % gridY_dim);
+            const zInBlock = Math.floor(indexInBlock / (gridX_dim * gridY_dim));
+
+            // Calculate offsets to center the *individual block* around its origin
+            const blockCenterOffsetX = (gridX_dim - 1) * spacing / 2;
+            const blockCenterOffsetY = (gridY_dim - 1) * spacing / 2;
+            const blockCenterOffsetZ = (gridZ_dim - 1) * spacing / 2;
+
+            // Calculate final global position
+            const finalX = overallStartX +
+                           (currentBlockIndex * blockSpacingX) +
+                           (xInBlock * spacing) - blockCenterOffsetX;
+            const finalY = (yInBlock * spacing) - blockCenterOffsetY;
+            const finalZ = (zInBlock * spacing) - blockCenterOffsetZ;
+
+            const geometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+
+            // Using MeshBasicMaterial with map for image texture, tinted by color
+            const material = new THREE.MeshBasicMaterial({
+                map: textureRef.current, // Apply the loaded texture
+                color: color // Apply the tint color (orange or blue)
+            });
+
+            // Alternatively, for lighting effects on the texture:
+            // const material = new THREE.MeshStandardMaterial({
+            //     map: textureRef.current,
+            //     color: color, // This color will tint the texture
+            //     roughness: 0.5,
+            //     metalness: 0.5
+            // });
+
+            const newShape = new THREE.Mesh(geometry, material);
+            newShape.position.set(finalX, finalY, finalZ);
+            sceneRef.current.add(newShape);
+            shapeMeshesRef.current.push(newShape);
+        }
+    }, [clearShapes, textureLoaded]); // Added textureLoaded to dependencies
 
     // Effect for setting up the Three.js scene (runs once on mount)
     useEffect(() => {
@@ -127,15 +215,30 @@ const App = () => {
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         cameraRef.current = camera;
-        camera.position.z = 5;
+        camera.position.z = 25; // ZOOOMED OUT MORE: Increased camera Z position to move it further back
 
         if (initialMountPoint) {
             initialMountPoint.appendChild(canvasElement);
             handleResize(); // Initial resize to fit the full window
         }
 
-        // Add initial shape
-        addShape();
+        // Load the texture first
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(
+            '/NEWPIC.jpg', // Path to your image in the public folder
+            (texture) => {
+                textureRef.current = texture;
+                setTextureLoaded(true); // Set state to true when texture is loaded
+                // After texture is loaded, add initial shapes
+                addShapesForEquation(number1, number2);
+            },
+            undefined, // onProgress callback - not needed here
+            (err) => {
+                console.error('An error occurred loading the texture:', err);
+                setTextureLoaded(false); // Indicate texture loading failed
+                alert("Failed to load image: NEWPIC.jpg. Please ensure it's in the 'public' folder.");
+            }
+        );
 
         // Lighting
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -256,22 +359,12 @@ const App = () => {
             window.removeEventListener('resize', handleResize);
 
             // Dispose Three.js objects
-            if (sceneRef.current) {
-                // Iterate over all actual mesh objects stored in the ref
-                shapeMeshesRef.current.forEach(object => {
-                    if (object.geometry) {
-                        object.geometry.dispose();
-                    }
-                    if (object.material) {
-                        if (Array.isArray(object.material)) {
-                            object.material.forEach((material) => material.dispose());
-                        } else {
-                            object.material.dispose();
-                        }
-                    }
-                    sceneRef.current.remove(object); // Remove from scene
-                });
-                shapeMeshesRef.current = []; // Clear the ref
+            clearShapes(); // Use the dedicated clear function for cleanup
+            shapeMeshesRef.current = []; // Ensure the ref is empty after cleanup
+
+            // Dispose the texture
+            if (textureRef.current) {
+                textureRef.current.dispose();
             }
 
             if (currentRendererInstance) {
@@ -279,22 +372,27 @@ const App = () => {
                 currentRendererInstance.dispose();
             }
         };
-    }, []); // Empty dependency array means this effect runs once on mount
+    }, [handleResize, addShapesForEquation, clearShapes, number1, number2]); // Dependencies now correctly include handleResize, addShapesForEquation, clearShapes, and the initial numbers.
+    // Also removed `textureLoaded` from dependencies here to prevent re-initialization of scene,
+    // as `addShapesForEquation` will be called once `textureLoaded` is true.
 
-    // Effect to update positions if shapes change (though addShape already handles positioning)
-    // This is more for re-centering if a shape were removed or reordered
-    useEffect(() => {
-        if (sceneRef.current && shapeMeshesRef.current.length > 0) {
-            const spacing = 1.5;
-            const totalWidth = (shapeMeshesRef.current.length - 1) * spacing;
-            const startX = -totalWidth / 2;
 
-            shapeMeshesRef.current.forEach((shape, index) => {
-                shape.position.set(startX + (index * spacing), 0, 0);
-            });
+    // Handle button click to visualize the equation
+    const handleVisualizeClick = () => {
+        const num1 = parseInt(number1);
+        const num2 = parseInt(number2);
+
+        if (isNaN(num1) || isNaN(num2) || num1 < 0 || num2 < 0) {
+            alert("Please enter valid non-negative numbers.");
+            return;
         }
-    }, [shapes.length]); // Re-run if the number of shapes changes
-
+        // Only attempt to add shapes if texture is loaded
+        if (textureLoaded) {
+            addShapesForEquation(num1, num2);
+        } else {
+            alert("Image texture is still loading or failed to load. Please wait or check console for errors.");
+        }
+    };
 
     return (
         <div className="flex flex-col items-center justify-end w-screen h-screen bg-gray-900 font-inter p-4 overflow-hidden relative">
@@ -306,18 +404,39 @@ const App = () => {
                 {/* Three.js content will be appended here */}
             </div>
 
-            {/* UI elements (buttons) placed on top of the 3D scene */}
-            <div className="relative z-10 flex flex-col sm:flex-row gap-4 mb-4">
+            {/* UI elements (calculator inputs and buttons) placed on top of the 3D scene */}
+            <div className="relative z-10 flex flex-col sm:flex-row gap-4 mb-4 items-center bg-gray-800 p-4 rounded-lg shadow-xl">
+                <input
+                    type="number"
+                    value={number1}
+                    onChange={(e) => setNumber1(e.target.value)}
+                    placeholder="Number 1"
+                    className="w-28 p-2 rounded-md bg-gray-700 text-white border border-gray-600 focus:ring-teal-500 focus:border-teal-500 transition-colors duration-200"
+                />
+                <span className="text-white text-2xl font-bold">+</span>
+                <input
+                    type="number"
+                    value={number2}
+                    onChange={(e) => setNumber2(e.target.value)}
+                    placeholder="Number 2"
+                    className="w-28 p-2 rounded-md bg-gray-700 text-white border border-gray-600 focus:ring-teal-500 focus:border-teal-500 transition-colors duration-200"
+                />
                 <button
-                    onClick={addShape}
-                    className="px-6 py-3 bg-teal-600 text-white font-semibold rounded-full hover:bg-teal-700 transition-colors duration-200 shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-opacity-75"
+                    onClick={handleVisualizeClick}
+                    // Disable button if texture is not yet loaded
+                    disabled={!textureLoaded}
+                    className={`px-6 py-3 font-semibold rounded-full transition-colors duration-200 shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-opacity-75 ${
+                        textureLoaded
+                            ? 'bg-teal-600 text-white hover:bg-teal-700 focus:ring-teal-500'
+                            : 'bg-gray-500 text-gray-300 cursor-not-allowed'
+                    }`}
                     style={{
-                        background: 'linear-gradient(45deg, #2b8a78, #3de0c2)',
-                        border: '2px solid #1a5a4d',
-                        boxShadow: '0 5px 15px rgba(0, 204, 153, 0.4)'
+                        background: textureLoaded ? 'linear-gradient(45deg, #2b8a78, #3de0c2)' : '',
+                        border: textureLoaded ? '2px solid #1a5a4d' : 'none',
+                        boxShadow: textureLoaded ? '0 5px 15px rgba(0, 204, 153, 0.4)' : 'none'
                     }}
                 >
-                    Add Another Shape
+                    {textureLoaded ? 'Visualize Sum' : 'Loading Image...'}
                 </button>
                 <button
                     onClick={enterVR}
