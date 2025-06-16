@@ -31,12 +31,12 @@ const App = () => {
 
     // Effect for setting up the Three.js scene
     useEffect(() => {
-        // Capture the current values of refs and DOM elements at the time of effect execution
-        // This is crucial for cleanup to reference stable values, preventing ESLint warnings
-        // about mutable refs in cleanup closures and ensuring safe DOM manipulation.
-        const currentMount = mountRef.current;
+        // Capture the mount point and renderer/canvas instance at the time the effect runs.
+        // This is crucial for cleanup to reference stable values and prevent ESLint warnings
+        // about mutable refs in cleanup closures, ensuring safe DOM manipulation.
+        const initialMountPoint = mountRef.current;
         const currentRendererInstance = new THREE.WebGLRenderer({ antialias: true }); // Create renderer here
-        rendererRef.current = currentRendererInstance; // Assign to ref
+        rendererRef.current = currentRendererInstance; // Assign to ref for general access
         const canvasElement = currentRendererInstance.domElement; // Get the canvas element
 
         // Scene setup
@@ -49,9 +49,9 @@ const App = () => {
         cameraRef.current = camera;
         camera.position.z = 5;
 
-        // Append renderer's DOM element to the mount reference
-        if (currentMount) {
-            currentMount.appendChild(canvasElement);
+        // Append renderer's DOM element to the initial mount point
+        if (initialMountPoint) {
+            initialMountPoint.appendChild(canvasElement);
             // Initial resize to fit the container
             handleResize();
         }
@@ -182,8 +182,9 @@ const App = () => {
         // It's crucial for releasing resources and preventing memory leaks.
         return () => {
             // Remove the canvas element from the DOM to clean up its presence.
-            if (currentMount && canvasElement.parentNode === currentMount) {
-                currentMount.removeChild(canvasElement);
+            // Use the captured 'initialMountPoint' for cleanup to ensure stability.
+            if (initialMountPoint && canvasElement.parentNode === initialMountPoint) {
+                initialMountPoint.removeChild(canvasElement);
             }
 
             // Remove all event listeners to prevent memory leaks and unexpected behavior.
@@ -197,9 +198,9 @@ const App = () => {
 
             // Dispose of Three.js objects to free up GPU memory.
             // Scene objects are traversed to dispose of geometries and materials attached to meshes.
-            if (sceneRef.current) {
+            if (sceneRef.current) { // Use sceneRef.current for scene traversal and dispose of actual objects
                 sceneRef.current.traverse((object) => {
-                    // Only dispose if the object is a mesh
+                    // Only dispose if the object is a mesh (has geometry and material)
                     if (!object.isMesh) return;
 
                     // Dispose geometry if it exists
