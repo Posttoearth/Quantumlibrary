@@ -1,27 +1,30 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
-// Import WebXR-specific Three.js components if needed, though they are often built-in
-// For basic WebXR, Three.js handles much of it internally.
 
 const App = () => {
+    // Reference to the canvas element where the 3D scene will be rendered
     const mountRef = useRef(null);
-    const [message, setMessage] = useState("Drag your mouse to rotate the object! Click 'Enter VR' for immersion.");
 
+    // State for scene elements to be accessed across re-renders
     const sceneRef = useRef(null);
     const cameraRef = useRef(null);
     const rendererRef = useRef(null);
-    const cubeRef = useRef(null);
+    // State to keep track of the number of shapes and their references
+    const [shapes, setShapes] = useState([]);
+    const shapeMeshesRef = useRef([]); // To hold actual Three.js mesh objects
 
+    // Mouse interaction variables (simplified as automatic rotation is preferred)
     const isDragging = useRef(false);
     const previousMousePosition = useRef({ x: 0, y: 0 });
 
+    // Function to handle window resizing for responsiveness
     const handleResize = useCallback(() => {
-        if (cameraRef.current && rendererRef.current && mountRef.current) {
-            // For a standard web view, adjust to container size.
+        if (cameraRef.current && rendererRef.current) {
+            // For a standard web view, adjust to full window size.
             // In VR, the renderer will manage its own size/aspect ratio based on the headset.
             if (!rendererRef.current.xr.isPresenting) { // Only resize if not in VR
-                const width = mountRef.current.clientWidth;
-                const height = mountRef.current.clientHeight;
+                const width = window.innerWidth;
+                const height = window.innerHeight;
                 cameraRef.current.aspect = width / height;
                 cameraRef.current.updateProjectionMatrix();
                 rendererRef.current.setSize(width, height);
@@ -29,7 +32,7 @@ const App = () => {
         }
     }, []);
 
-    // Function to enter VR
+    // Function to enter VR session
     const enterVR = useCallback(async () => {
         if (!rendererRef.current) {
             console.error("Renderer not initialized.");
@@ -38,42 +41,37 @@ const App = () => {
 
         if (navigator.xr) {
             try {
-                // Request an immersive-vr session
                 const session = await navigator.xr.requestSession('immersive-vr', {
-                    // Optional: Request features like 'local-floor' for more robust tracking
                     requiredFeatures: ['local-floor', 'viewer']
                 });
 
-                // Set the renderer for XR presentation
                 rendererRef.current.xr.setSession(session);
-                setMessage("Welcome to VR! Look around with your headset.");
 
-                // Set the animation loop for VR. Three.js takes over the rendering.
-                // The animate function will now be called by the XR system at the VR headset's refresh rate.
+                // Set the animation loop for VR
                 rendererRef.current.setAnimationLoop(() => {
                     // In VR, the camera position and rotation are handled by the XR device.
-                    // We only need to animate our cube if desired.
-                    if (cubeRef.current) {
-                        cubeRef.current.rotation.x += 0.005;
-                        cubeRef.current.rotation.y += 0.005;
-                    }
+                    // We only need to animate our shapes.
+                    shapeMeshesRef.current.forEach(shape => {
+                        shape.rotation.x += 0.005;
+                        shape.rotation.y += 0.005;
+                    });
                     rendererRef.current.render(sceneRef.current, cameraRef.current);
                 });
 
                 // Listen for session end
                 session.addEventListener('end', () => {
-                    setMessage("VR session ended. Back to browser view.");
+                    console.log("VR session ended.");
                     // Reset to standard animation loop
                     rendererRef.current.setAnimationLoop(null);
                     // Re-enable browser-based animation loop
                     const animateNonVR = () => {
                         requestAnimationFrame(animateNonVR);
-                        if (!isDragging.current) {
-                            if (cubeRef.current) {
-                                cubeRef.current.rotation.x += 0.005;
-                                cubeRef.current.rotation.y += 0.005;
+                        shapeMeshesRef.current.forEach(shape => {
+                            if (!isDragging.current) { // Only auto-rotate if not dragging
+                                shape.rotation.x += 0.005;
+                                shape.rotation.y += 0.005;
                             }
-                        }
+                        });
                         rendererRef.current.render(sceneRef.current, cameraRef.current);
                     };
                     animateNonVR();
@@ -82,27 +80,50 @@ const App = () => {
 
             } catch (error) {
                 console.error("Failed to enter VR:", error);
-                setMessage("VR not supported or session failed. " + error.message);
+                alert("VR not supported or session failed: " + error.message); // Using alert for now, can replace with custom modal
             }
         } else {
-            setMessage("WebXR not supported in this browser or device.");
             console.warn("WebXR not available.");
+            alert("WebXR not supported in this browser or device."); // Using alert for now
         }
-    }, [handleResize]); // Added handleResize to dependency array
+    }, [handleResize]);
 
-    // Effect for setting up the Three.js scene
+    // Function to add a new shape
+    const addShape = useCallback(() => {
+        if (!sceneRef.current) return;
+
+        const index = shapes.length;
+        const geometry = new THREE.BoxGeometry(1, 1, 1); // Smaller box for multiple shapes
+        const material = new THREE.MeshStandardMaterial({
+            color: Math.random() * 0xffffff, // Random color for each new shape
+            roughness: 0.5,
+            metalness: 0.5
+        });
+        const newShape = new THREE.Mesh(geometry, material);
+
+        // Position the new shape next to the others
+        // We'll arrange them in a row along the X-axis
+        const spacing = 1.5; // Space between shapes
+        const startX = -((index * spacing) / 2); // Initial offset to center the group
+        newShape.position.set(startX + (index * spacing), 0, 0);
+
+        sceneRef.current.add(newShape);
+        shapeMeshesRef.current.push(newShape); // Add to the ref for managing meshes
+        setShapes(prevShapes => [...prevShapes, { id: Date.now(), mesh: newShape }]); // Add to state for re-render if needed
+    }, [shapes.length]); // Re-create if shapes.length changes
+
+    // Effect for setting up the Three.js scene (runs once on mount)
     useEffect(() => {
         const initialMountPoint = mountRef.current;
         const currentRendererInstance = new THREE.WebGLRenderer({ antialias: true });
         rendererRef.current = currentRendererInstance;
         const canvasElement = currentRendererInstance.domElement;
 
-        // --- Enable WebXR in the renderer ---
-        currentRendererInstance.xr.enabled = true;
+        currentRendererInstance.xr.enabled = true; // Enable WebXR in the renderer
 
         const scene = new THREE.Scene();
         sceneRef.current = scene;
-        scene.background = new THREE.Color(0x333366);
+        scene.background = new THREE.Color(0x1a1a2e); // Darker background
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         cameraRef.current = camera;
@@ -110,37 +131,40 @@ const App = () => {
 
         if (initialMountPoint) {
             initialMountPoint.appendChild(canvasElement);
-            handleResize();
+            handleResize(); // Initial resize to fit the full window
         }
 
-        const geometry = new THREE.BoxGeometry(2, 2, 2);
-        const material = new THREE.MeshStandardMaterial({ color: 0x00bfff });
-        const cube = new THREE.Mesh(geometry, material);
-        cubeRef.current = cube;
-        scene.add(cube);
+        // Add initial shape
+        addShape();
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
 
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
         directionalLight.position.set(5, 5, 5).normalize();
         scene.add(directionalLight);
 
-        // Standard animation loop for non-VR Browse
+        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+        directionalLight2.position.set(-5, -5, -5).normalize();
+        scene.add(directionalLight2);
+
+
+        // Standard animation loop for non-VR browsing
         const animate = () => {
             requestAnimationFrame(animate);
-            if (!isDragging.current) {
-                if (cubeRef.current) {
-                    cubeRef.current.rotation.x += 0.005;
-                    cubeRef.current.rotation.y += 0.005;
+            shapeMeshesRef.current.forEach(shape => {
+                if (!isDragging.current) {
+                    shape.rotation.x += 0.005;
+                    shape.rotation.y += 0.005;
                 }
-            }
+            });
             currentRendererInstance.render(scene, camera);
         };
 
         animate();
 
-        // Mouse/Touch interaction listeners (only active when not in VR)
+        // Mouse/Touch interaction listeners for camera control (simplified)
         const onMouseDown = (event) => {
             if (!currentRendererInstance.xr.isPresenting) {
                 isDragging.current = true;
@@ -163,9 +187,10 @@ const App = () => {
                     x: event.clientX - previousMousePosition.current.x,
                     y: event.clientY - previousMousePosition.current.y
                 };
-                if (cubeRef.current) {
-                    cubeRef.current.rotation.y += deltaMove.x * 0.01;
-                    cubeRef.current.rotation.x += deltaMove.y * 0.01;
+                // Rotate the whole scene or camera based on mouse movement
+                if (sceneRef.current) {
+                    sceneRef.current.rotation.y += deltaMove.x * 0.005; // Rotate scene around Y
+                    sceneRef.current.rotation.x += deltaMove.y * 0.005; // Rotate scene around X
                 }
                 previousMousePosition.current = {
                     x: event.clientX,
@@ -196,9 +221,9 @@ const App = () => {
                     x: event.touches[0].clientX - previousMousePosition.current.x,
                     y: event.touches[0].clientY - previousMousePosition.current.y
                 };
-                if (cubeRef.current) {
-                    cubeRef.current.rotation.y += deltaMove.x * 0.01;
-                    cubeRef.current.rotation.x += deltaMove.y * 0.01;
+                if (sceneRef.current) {
+                    sceneRef.current.rotation.y += deltaMove.x * 0.005;
+                    sceneRef.current.rotation.x += deltaMove.y * 0.005;
                 }
                 previousMousePosition.current = {
                     x: event.touches[0].clientX,
@@ -216,12 +241,12 @@ const App = () => {
 
         window.addEventListener('resize', handleResize);
 
+        // Cleanup function
         return () => {
             if (initialMountPoint && canvasElement.parentNode === initialMountPoint) {
                 initialMountPoint.removeChild(canvasElement);
             }
 
-            // Remove all event listeners. Make sure to remove the correct functions.
             canvasElement.removeEventListener('mousedown', onMouseDown);
             canvasElement.removeEventListener('mouseup', onMouseUp);
             canvasElement.removeEventListener('mousemove', onMouseMove);
@@ -232,8 +257,8 @@ const App = () => {
 
             // Dispose Three.js objects
             if (sceneRef.current) {
-                sceneRef.current.traverse((object) => {
-                    if (!object.isMesh) return;
+                // Iterate over all actual mesh objects stored in the ref
+                shapeMeshesRef.current.forEach(object => {
                     if (object.geometry) {
                         object.geometry.dispose();
                     }
@@ -244,45 +269,64 @@ const App = () => {
                             object.material.dispose();
                         }
                     }
+                    sceneRef.current.remove(object); // Remove from scene
                 });
+                shapeMeshesRef.current = []; // Clear the ref
             }
 
             if (currentRendererInstance) {
-                // Crucially, stop the XR animation loop if it's active
-                currentRendererInstance.setAnimationLoop(null);
+                currentRendererInstance.setAnimationLoop(null); // Stop any active animation loop
                 currentRendererInstance.dispose();
             }
         };
-    }, [handleResize]);
+    }, []); // Empty dependency array means this effect runs once on mount
+
+    // Effect to update positions if shapes change (though addShape already handles positioning)
+    // This is more for re-centering if a shape were removed or reordered
+    useEffect(() => {
+        if (sceneRef.current && shapeMeshesRef.current.length > 0) {
+            const spacing = 1.5;
+            const totalWidth = (shapeMeshesRef.current.length - 1) * spacing;
+            const startX = -totalWidth / 2;
+
+            shapeMeshesRef.current.forEach((shape, index) => {
+                shape.position.set(startX + (index * spacing), 0, 0);
+            });
+        }
+    }, [shapes.length]); // Re-run if the number of shapes changes
+
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white font-inter p-4">
-            <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-2xl text-center mb-6">
-                <h1 className="text-3xl font-bold text-teal-300 mb-2">Welcome to the Meta World Hub!</h1>
-                <p className="text-lg text-gray-300">{message}</p>
-            </div>
+        <div className="flex flex-col items-center justify-end w-screen h-screen bg-gray-900 font-inter p-4 overflow-hidden relative">
+            {/* The 3D canvas container will now fill the entire screen */}
             <div
                 ref={mountRef}
-                className="w-full max-w-4xl h-96 md:h-[600px] bg-black rounded-lg shadow-2xl overflow-hidden relative"
+                className="absolute inset-0 z-0" // Position absolutely to fill parent and go behind UI
             >
                 {/* Three.js content will be appended here */}
             </div>
-            <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-2xl text-center mt-6">
-                <p className="text-md text-gray-400">
-                    This is a basic interactive 3D web experience built with React and Three.js,
-                    designed to show how a "Meta World" website could function.
-                    It can be viewed in a standard browser or potentially embedded in a VR environment
-                    that supports web content.
-                </p>
+
+            {/* UI elements (buttons) placed on top of the 3D scene */}
+            <div className="relative z-10 flex flex-col sm:flex-row gap-4 mb-4">
                 <button
-                    onClick={() => setMessage("Hello, adventurer! What brings you to this digital realm?")}
-                    className="mt-4 mr-2 px-6 py-2 bg-teal-600 text-white rounded-md hover:bg-teal-700 transition-colors duration-200 shadow-md"
+                    onClick={addShape}
+                    className="px-6 py-3 bg-teal-600 text-white font-semibold rounded-full hover:bg-teal-700 transition-colors duration-200 shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-opacity-75"
+                    style={{
+                        background: 'linear-gradient(45deg, #2b8a78, #3de0c2)',
+                        border: '2px solid #1a5a4d',
+                        boxShadow: '0 5px 15px rgba(0, 204, 153, 0.4)'
+                    }}
                 >
-                    Change Message
+                    Add Another Shape
                 </button>
                 <button
                     onClick={enterVR}
-                    className="mt-4 px-6 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors duration-200 shadow-md"
+                    className="px-6 py-3 bg-purple-600 text-white font-semibold rounded-full hover:bg-purple-700 transition-colors duration-200 shadow-lg transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-75"
+                    style={{
+                        background: 'linear-gradient(45deg, #7c3aed, #a78bfa)',
+                        border: '2px solid #5a2e9b',
+                        boxShadow: '0 5px 15px rgba(124, 58, 237, 0.4)'
+                    }}
                 >
                     Enter VR
                 </button>
