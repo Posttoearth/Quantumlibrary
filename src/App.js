@@ -26,8 +26,8 @@ const App = () => {
         <div className="absolute bottom-0 right-0 w-80 h-80 bg-blue-200 opacity-30 rounded-full mix-blend-multiply filter blur-xl transform -translate-x-1/4 translate-y-1/4 animate-blob animation-delay-2000"></div>
         <div className="absolute top-1/4 left-1/2 w-48 h-48 bg-indigo-200 opacity-30 rounded-full mix-blend-multiply filter blur-xl animate-blob animation-delay-4000"></div>
 
-        {/* Existing background image placeholder - kept for subtle texture */}
-        <div className="absolute inset-0 bg-hero-pattern opacity-5" style={{ backgroundImage: "url('https://placehold.co/1920x1080/E0E7FF/6366F1?text=Abstract+Background')" }}></div>
+        {/* Existing background image placeholder - 'Abstract Background' text removed */}
+        <div className="absolute inset-0 bg-hero-pattern opacity-5" style={{ backgroundImage: "url('https://placehold.co/1920x1080/E0E7FF/6366F1')" }}></div>
 
         <div className="relative z-10 max-w-4xl mx-auto bg-white/70 p-10 rounded-3xl shadow-xl backdrop-blur-sm border border-indigo-200">
           <h1 className="text-6xl font-extrabold text-gray-900 leading-tight mb-6">
@@ -226,6 +226,3 @@ const App = () => {
 };
 
 export default App;
-
-export default App;
-
