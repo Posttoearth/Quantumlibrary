@@ -6,8 +6,8 @@ const App = () => {
       {/* Header Section */}
       <header className="py-6 shadow-md bg-white/80 backdrop-blur-sm sticky top-0 z-50 rounded-b-lg">
         <nav className="container mx-auto px-6 flex justify-between items-center">
-          {/* Updated company name */}
-          <a href="#" className="text-3xl font-extrabold text-indigo-700 hover:text-indigo-900 transition duration-300 ease-in-out">
+          {/* Updated company name with href="/" */}
+          <a href="/" className="text-3xl font-extrabold text-indigo-700 hover:text-indigo-900 transition duration-300 ease-in-out">
             Abdul Hill
           </a>
           <ul className="flex space-x-8">
@@ -27,7 +27,7 @@ const App = () => {
         <div className="absolute top-1/4 left-1/2 w-48 h-48 bg-indigo-200 opacity-30 rounded-full mix-blend-multiply filter blur-xl animate-blob animation-delay-4000"></div>
 
         {/* Existing background image placeholder - kept for subtle texture */}
-
+        <div className="absolute inset-0 bg-hero-pattern opacity-5" style={{ backgroundImage: "url('https://placehold.co/1920x1080/E0E7FF/6366F1?text=Abstract+Background')" }}></div>
 
         <div className="relative z-10 max-w-4xl mx-auto bg-white/70 p-10 rounded-3xl shadow-xl backdrop-blur-sm border border-indigo-200">
           <h1 className="text-6xl font-extrabold text-gray-900 leading-tight mb-6">
@@ -226,3 +226,4 @@ const App = () => {
 };
 
 export default App;
+
